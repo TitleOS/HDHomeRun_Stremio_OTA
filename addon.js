@@ -48,31 +48,59 @@ builder.defineCatalogHandler(async () => {
     } catch (e) { return { metas: [] }; }
 });
 
-// 2. Meta Handler
-builder.defineMetaHandler(async ({ id }) => {
+// 2. Meta Handler: Must return the EXACT ID requested
+builder.defineMetaHandler(async ({ type, id }) => {
+    if (type !== 'tv' || !id.startsWith('hdhr_')) return { meta: null };
+
     const guideNum = id.replace('hdhr_', '');
+    
     return {
         meta: {
-            id,
+            id: id, // Keep the 'hdhr_' prefix here!
             type: 'tv',
             name: `Channel ${guideNum}`,
             poster: getAssetUrl(guideNum),
             logo: getAssetUrl(guideNum),
             background: getAssetUrl(guideNum),
-            description: `Streaming Live from HDHomerun Channel ${guideNum}`,
+            description: `Live OTA Broadcast from HDHomerun Tuner.`,
+            runtime: "LIVE",
+            // Some Stremio versions require these for Live TV to render correctly
+            isSelfHosted: true,
+            behaviorHints: {
+                isLive: true
+            }
         }
     };
 });
 
-// 3. Stream Handler
-builder.defineStreamHandler(async ({ id }) => {
+// 3. Stream Handler: Ensure the Mediaflow URL is properly encoded
+builder.defineStreamHandler(async ({ type, id }) => {
+    if (type !== 'tv' || !id.startsWith('hdhr_')) return { streams: [] };
+
     const guideNum = id.replace('hdhr_', '');
+    
+    // Construct the URLs
     const rawUrl = `http://${HDHOMERUN_IP}:5004/auto/v${guideNum}`;
-    const proxiedUrl = `${MEDIAFLOW_URL}/proxy/stream?d=${encodeURIComponent(rawUrl)}&api_password=${MEDIAFLOW_PASS}`;
+    const proxiedUrl = `${MEDIAFLOW_URL}/proxy/stream?d=${encodeURIComponent(rawUrl)}&api_password=${encodeURIComponent(MEDIAFLOW_PASS)}`;
+
+    console.log(`Streaming requested for Channel ${guideNum}`);
+
     return {
         streams: [
-            { title: '🌀 Mediaflow Proxy', url: proxiedUrl },
-            { title: '📡 Direct HDHomerun', url: rawUrl }
+            { 
+                title: '🌀 Mediaflow Proxy (Transcoded)', 
+                url: proxiedUrl,
+                behaviorHints: {
+                    notWebReady: false // Tells Stremio the proxy makes it browser-compatible
+                }
+            },
+            { 
+                title: '📡 Direct HDHomerun (Raw MPEG-TS)', 
+                url: rawUrl,
+                behaviorHints: {
+                    notWebReady: true // Raw MPEG-TS usually fails in Chrome/Safari
+                }
+            }
         ]
     };
 });
