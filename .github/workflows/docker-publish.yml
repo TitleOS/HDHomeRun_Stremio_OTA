@@ -9,42 +9,30 @@ on:
       - 'README.md' # Don't build if you only update the readme
 
 env:
-  # TODO: Replace with your actual Docker Hub username and repo name
   IMAGE_NAME: titleos/hdhomerun-stremio
+  REPO_NAME: hdhomerun-stremio
+  DOCKER_USER: ${{ secrets.DOCKER_USERNAME }}
 
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
-
     steps:
-      # 1. Check out your code
-      - name: Checkout code
-        uses: actions/checkout@v4
+      # ... (checkout, qemu, buildx steps remain the same) ...
 
-      # 2. Set up QEMU (Optional, but great for multi-arch support later)
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      # 3. Set up Docker Buildx (The modern builder)
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      # 4. Login to Docker Hub using the secrets you configured
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      # 5. Build and Push the image
       - name: Build and push
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
+          # Construct the image name dynamically using the secret username
           tags: |
-            ${{ env.IMAGE_NAME }}:latest
-            ${{ env.IMAGE_NAME }}:${{ github.sha }}
-          # UPDATED: Use GitHub Actions native cache instead of Registry cache
+            ${{ secrets.DOCKER_USERNAME }}/${{ env.REPO_NAME }}:latest
+            ${{ secrets.DOCKER_USERNAME }}/${{ env.REPO_NAME }}:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
