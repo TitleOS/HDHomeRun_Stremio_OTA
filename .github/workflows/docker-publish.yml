@@ -1,0 +1,51 @@
+name: Build and Push to Docker Hub
+
+# Trigger the workflow on pushes to the main branch
+on:
+  push:
+    branches:
+      - main  # Change this if your default branch is 'master'
+    paths-ignore:
+      - 'README.md' # Don't build if you only update the readme
+
+env:
+  # TODO: Replace with your actual Docker Hub username and repo name
+  IMAGE_NAME: titleos/hdhomerun-stremio
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Check out your code
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2. Set up QEMU (Optional, but great for multi-arch support later)
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      # 3. Set up Docker Buildx (The modern builder)
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # 4. Login to Docker Hub using the secrets you configured
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      # 5. Build and Push the image
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          # Tags: 'latest' for general use, and the commit SHA for version locking
+          tags: |
+            ${{ env.IMAGE_NAME }}:latest
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          # Caching makes subsequent builds much faster
+          cache-from: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache,mode=max
