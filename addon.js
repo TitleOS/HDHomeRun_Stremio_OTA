@@ -7,12 +7,13 @@ const path = require('path');
 const HDHOMERUN_IP = process.env.HDHOMERUN_IP || '192.168.1.100';
 const MEDIAFLOW_URL = process.env.MEDIAFLOW_URL || 'http://localhost:8888';
 const MEDIAFLOW_PASS = process.env.MEDIAFLOW_PASS || '';
+const EXTERNAL_URL = process.env.EXTERNAL_URL || 'http://stremioota.lcars.lan';
 const PORT = process.env.PORT || 7000;
-const EXTERNAL_URL = process.env.EXTERNAL_URL || `http://stremioota.lan`;
+const DEBUG = process.env.DEBUG_LOGGING === 'true';
 
 const MANIFEST = {
     id: 'org.titleos.hdhomerun',
-    version: '1.2.2',
+    version: '1.2.3',
     name: 'HDHomerun Live',
     description: `OTA via ${HDHOMERUN_IP}`,
     resources: ['catalog', 'meta', 'stream'],
@@ -21,19 +22,15 @@ const MANIFEST = {
     idPrefixes: ['hdhr_']
 };
 
-// Helper: Determine if a logo likely exists or return the placeholder
-const getAssetUrl = (guideNum) => {
-    // If you want to blindly trust the tuner:
-    // return `http://${HDHOMERUN_IP}/images/L${guideNum}.png`;
-    
-    // Better: Serve the fallback from our own server
-    return `${EXTERNAL_URL}/assets/L${guideNum}.png`;
-};
+// Helper: Logo URL generator
+const getAssetUrl = (guideNum) => `${EXTERNAL_URL}/assets/L${guideNum}.png`;
 
 const builder = new addonBuilder(MANIFEST);
 
 // 1. Catalog Handler
-builder.defineCatalogHandler(async () => {
+builder.defineCatalogHandler(async ({ type, id }) => {
+    if (DEBUG) console.log(`[CATALOG] Request for ${type} / ${id}`);
+    
     try {
         const res = await axios.get(`http://${HDHOMERUN_IP}/lineup.json`, { timeout: 3000 });
         const metas = res.data.map(c => ({
@@ -44,19 +41,24 @@ builder.defineCatalogHandler(async () => {
             logo: getAssetUrl(c.GuideNumber),
             description: `Live on ${c.GuideName}`
         }));
+        if (DEBUG) console.log(`[CATALOG] Returning ${metas.length} channels`);
         return { metas };
-    } catch (e) { return { metas: [] }; }
+    } catch (e) {
+        console.error(`[ERROR] Catalog fetch failed: ${e.message}`);
+        return { metas: [] };
+    }
 });
 
-// 2. Meta Handler: Must return the EXACT ID requested
+// 2. Meta Handler
 builder.defineMetaHandler(async ({ type, id }) => {
+    if (DEBUG) console.log(`[META] Request for ${type} / ${id}`);
+    
     if (type !== 'tv' || !id.startsWith('hdhr_')) return { meta: null };
-
     const guideNum = id.replace('hdhr_', '');
     
     return {
         meta: {
-            id: id, // Keep the 'hdhr_' prefix here!
+            id: id,
             type: 'tv',
             name: `Channel ${guideNum}`,
             poster: getAssetUrl(guideNum),
@@ -64,43 +66,24 @@ builder.defineMetaHandler(async ({ type, id }) => {
             background: getAssetUrl(guideNum),
             description: `Live OTA Broadcast from HDHomerun Tuner.`,
             runtime: "LIVE",
-            // Some Stremio versions require these for Live TV to render correctly
-            isSelfHosted: true,
-            behaviorHints: {
-                isLive: true
-            }
+            behaviorHints: { isLive: true }
         }
     };
 });
 
-// 3. Stream Handler: Ensure the Mediaflow URL is properly encoded
+// 3. Stream Handler
 builder.defineStreamHandler(async ({ type, id }) => {
-    if (type !== 'tv' || !id.startsWith('hdhr_')) return { streams: [] };
-
-    const guideNum = id.replace('hdhr_', '');
+    if (DEBUG) console.log(`[STREAM] Request for ${type} / ${id}`);
     
-    // Construct the URLs
+    if (type !== 'tv' || !id.startsWith('hdhr_')) return { streams: [] };
+    const guideNum = id.replace('hdhr_', '');
     const rawUrl = `http://${HDHOMERUN_IP}:5004/auto/v${guideNum}`;
     const proxiedUrl = `${MEDIAFLOW_URL}/proxy/stream?d=${encodeURIComponent(rawUrl)}&api_password=${encodeURIComponent(MEDIAFLOW_PASS)}`;
 
-    console.log(`Streaming requested for Channel ${guideNum}`);
-
     return {
         streams: [
-            { 
-                title: '🌀 Mediaflow Proxy (Transcoded)', 
-                url: proxiedUrl,
-                behaviorHints: {
-                    notWebReady: false // Tells Stremio the proxy makes it browser-compatible
-                }
-            },
-            { 
-                title: '📡 Direct HDHomerun (Raw MPEG-TS)', 
-                url: rawUrl,
-                behaviorHints: {
-                    notWebReady: true // Raw MPEG-TS usually fails in Chrome/Safari
-                }
-            }
+            { title: '🌀 Mediaflow Proxy', url: proxiedUrl, behaviorHints: { notWebReady: false } },
+            { title: '📡 Direct HDHomerun', url: rawUrl, behaviorHints: { notWebReady: true } }
         ]
     };
 });
@@ -110,18 +93,27 @@ const app = express();
 const addonInterface = builder.getInterface();
 const addonRouter = getRouter(addonInterface);
 
+// DEBUG MIDDLEWARE: Prints every incoming request
+if (DEBUG) {
+    app.use((req, res, next) => {
+        console.log(`[HTTP] ${req.method} ${req.url}`);
+        next();
+    });
+}
+
 app.use('/', addonRouter);
 
-// New Asset Route: Tries to get the real logo, falls back to your retro TV PNG
+// Asset Route with Debugging
 app.get('/assets/:filename', async (req, res) => {
     const logoUrl = `http://${HDHOMERUN_IP}/images/${req.params.filename}`;
+    if (DEBUG) console.log(`[ASSET] Fetching ${req.params.filename} from ${logoUrl}`);
+
     try {
-        // We do a quick HEAD request to see if the tuner actually has the logo
-        await axios.head(logoUrl, { timeout: 1000 });
+        await axios.get(logoUrl, { timeout: 2000, headers: { 'Range': 'bytes=0-0' } });
         res.redirect(logoUrl);
     } catch (e) {
-        // Fallback to the local file in your repo
-        res.sendFile(path.join(__dirname, 'fallback_icon.png'));
+        if (DEBUG) console.log(`[ASSET] Failed to find ${req.params.filename}. Serving placeholder.`);
+        res.sendFile(path.join(__dirname, 'placeholder.png'));
     }
 });
 
@@ -132,4 +124,4 @@ app.get('/health', async (req, res) => {
     } catch (e) { res.status(503).send('Unreachable'); }
 });
 
-app.listen(PORT, () => console.log(`Addon active on port ${PORT}`));
+app.listen(PORT, () => console.log(`Addon active on port ${PORT} (Debug: ${DEBUG})`));
