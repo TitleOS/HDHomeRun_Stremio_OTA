@@ -49,13 +49,18 @@ docker run -d \
 ## Configuration
 
 | Variable | Description | Default |
-| --- | --- | --- |
+| :--- | :--- | :--- |
 | `HDHOMERUN_IP` | The local IP address of your HDHomeRun tuner. | `192.168.1.100` |
+| `EXTERNAL_URL` | The URL used to reach this addon (used for logo proxying). | `http://stremioota.lan` |
 | `MEDIAFLOW_URL` | The full URL to your Mediaflow Proxy instance. | `http://localhost:8888` |
 | `MEDIAFLOW_PASS` | The API password configured in Mediaflow. | `(Empty)` |
 | `PORT` | The port the addon listens on. | `7000` |
 
-## 🔌 Connecting to Stremio
+## LAN Environment Setup
+
+In a local network (LAN) setup, especially when using a custom domain like `.lan` or `.local`, you must define the `EXTERNAL_URL` so Stremio knows where to fetch the channel logos and the fallback placeholder.
+
+## Connecting to Stremio
 
 1. Ensure the container is running and accessible.
 2. Open Stremio on your device.
