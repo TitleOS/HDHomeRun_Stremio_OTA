@@ -27,6 +27,7 @@ services:
       - MEDIAFLOW_URL=[http://192.168.1.50:8888](http://192.168.1.50:8888)  # Your Mediaflow Proxy URL
       - MEDIAFLOW_PASS=your_password     # Your Mediaflow API Password
       - PORT=7000                        # Internal container port
+      - DEBUG_LOGGING=true               # Print all HTTP requests and also debug info to the console.
     ports:
       - "7000:7000"
 
@@ -55,6 +56,7 @@ docker run -d \
 | `MEDIAFLOW_URL` | The full URL to your Mediaflow Proxy instance. | `http://localhost:8888` |
 | `MEDIAFLOW_PASS` | The API password configured in Mediaflow. | `(Empty)` |
 | `PORT` | The port the addon listens on. | `7000` |
+| `DEBUG_LOGGING` | Log debug content to the console such as HTTP requests. | `true` |
 
 ## LAN Environment Setup
 
