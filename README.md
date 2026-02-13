@@ -8,8 +8,8 @@ A Stremio addon that imports your local OTA (Over-the-Air) channels from an **HD
 ## 📺 Features
 
 * **Live TV Catalog:** Adds a "HDHomerun" row to your Stremio Board.
-* **Smart EPG:** Automatically fetches "Now Playing" data using your HDHomeRun's native cloud guide (no extra config/ZIP needed).
-* **Dynamic Logos:** Fetches channel logos from GitHub, falls back to generated Avatars, and finally to a local retro-style icon.
+* **Smart EPG:** Automatically fetches "Now Playing" data using your HDHomeRun's native cloud guide (no extra config/ZIP needed, thougha Silicon Dust subscription is required).
+* **Dynamic Logos:** Fetches channel logos from generated Avatars, otherwise falling back to a local retro-style icon.
 * **Tech Specs Dashboard:** View real-time signal strength, quality, and codec info directly in the stream list.
 * **Transcoding Support:** Routes streams through a [Mediaflow Proxy](https://github.com/mhadzic/mediaflow-proxy) to handle ATSC 3.0 (AC-4 audio).
 
