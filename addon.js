@@ -13,7 +13,7 @@ const DEBUG = process.env.DEBUG_LOGGING === 'true';
 
 const MANIFEST = {
     id: 'org.titleos.hdhomerun',
-    version: '1.4.2', // Bump version to force update
+    version: '1.1.0', // Bump version
     name: 'HDHomerun Live',
     description: `OTA via ${HDHOMERUN_IP}`,
     resources: ['catalog', 'meta', 'stream'],
@@ -27,22 +27,36 @@ const getAssetUrl = (guideName) => {
     return `${EXTERNAL_URL}/assets/${encodeURIComponent(cleanName)}.png`;
 };
 
+// --- EPG Logic ---
 const getNowPlaying = async (guideNumber) => {
     try {
+        // 1. Get Device Auth
         const discover = await axios.get(`http://${HDHOMERUN_IP}/discover.json`, { timeout: 1000 });
         const deviceAuth = discover.data.DeviceAuth;
-        if (!deviceAuth) return null;
+        if (!deviceAuth) {
+            if (DEBUG) console.log(`[EPG] No DeviceAuth found in discover.json`);
+            return null;
+        }
 
+        // 2. Fetch Guide
         const guideRes = await axios.get(`http://api.hdhomerun.com/api/guide?DeviceAuth=${deviceAuth}`, { timeout: 2000 });
         
+        // 3. Find Channel
         const channelData = guideRes.data.find(c => c.GuideNumber === guideNumber);
-        if (!channelData || !channelData.Guide) return null;
+        if (!channelData || !channelData.Guide) {
+            if (DEBUG) console.log(`[EPG] No guide data found for Channel ${guideNumber}`);
+            return null;
+        }
 
-        const now = Math.floor(Date.now() / 1000);
+        // 4. Find Program
+        const now = Math.floor(Date.now() / 1000); // Current time in seconds
         const currentProg = channelData.Guide.find(p => now >= p.StartTime && now < p.EndTime);
+        
+        if (currentProg && DEBUG) console.log(`[EPG] Ch ${guideNumber} is playing: ${currentProg.Title}`);
+        
         return currentProg ? currentProg.Title : null;
     } catch (e) {
-        if (DEBUG) console.log(`[EPG] Error fetching guide: ${e.message}`);
+        if (DEBUG) console.log(`[EPG] Error: ${e.message}`);
         return null;
     }
 };
@@ -51,7 +65,6 @@ const builder = new addonBuilder(MANIFEST);
 
 // 1. Catalog Handler
 builder.defineCatalogHandler(async ({ type, id }) => {
-    if (DEBUG) console.log(`[CATALOG] Request for ${type} / ${id}`);
     if (type !== 'tv' && type !== 'channel') return { metas: [] };
 
     try {
@@ -65,9 +78,7 @@ builder.defineCatalogHandler(async ({ type, id }) => {
             description: `Channel ${c.GuideNumber}`
         }));
         return { metas };
-    } catch (e) {
-        return { metas: [] };
-    }
+    } catch (e) { return { metas: [] }; }
 });
 
 // 2. Meta Handler
@@ -82,6 +93,7 @@ builder.defineMetaHandler(async ({ type, id }) => {
         if (channel) guideName = channel.GuideName;
     } catch (e) {}
 
+    // Try to get EPG for description (might be cached by Stremio)
     let description = `Live on ${guideName}`;
     const nowPlaying = await getNowPlaying(guideNum);
     if (nowPlaying) description = `Live on ${nowPlaying}`;
@@ -96,26 +108,24 @@ builder.defineMetaHandler(async ({ type, id }) => {
             background: getAssetUrl(guideName),
             description: description,
             runtime: "LIVE",
-            behaviorHints: { 
-                isLive: true,
-                defaultVideoId: id 
-            }
+            behaviorHints: { isLive: true, defaultVideoId: id }
         }
     };
 });
 
-// 3. Stream Handler (Updated for HLS)
+// 3. Stream Handler (Updated with EPG in Title)
 builder.defineStreamHandler(async ({ type, id }) => {
-    if (DEBUG) console.log(`[STREAM] Request for ${type} / ${id}`);
     if ((type !== 'tv' && type !== 'channel') || !id.startsWith('hdhr_')) return { streams: [] };
 
     const guideNum = id.replace('hdhr_', '');
     const rawUrl = `http://${HDHOMERUN_IP}:5004/auto/v${guideNum}`;
-    
-    // CHANGE: Use HLS manifest endpoint instead of raw stream
-    // This forces Mediaflow to wrap the MPEG2/HEVC stream in an HLS container
     const hlsUrl = `${MEDIAFLOW_URL}/proxy/hls/manifest.m3u8?d=${encodeURIComponent(rawUrl)}&api_password=${encodeURIComponent(MEDIAFLOW_PASS)}`;
     
+    // Fetch EPG immediately for the Stream Title
+    const nowPlaying = await getNowPlaying(guideNum);
+    const showTitle = nowPlaying ? `(${nowPlaying})` : '(Live)';
+
+    // Tech Info
     let techInfoStream = null;
     try {
         const [discoverRes, lineupRes] = await Promise.all([
@@ -134,35 +144,33 @@ builder.defineStreamHandler(async ({ type, id }) => {
             techInfoStream = {
                 name: "ℹ️ DEVICE INFO",
                 title: `${tunerStr}\n${signalStr}\n${codecStr} (${hdStr})`,
-                url: `${EXTERNAL_URL}/assets/fallback_icon.png`
+                url: `${EXTERNAL_URL}/assets/hdhomerun_icon.png`
             };
         }
     } catch (e) {
         techInfoStream = {
             name: "ℹ️ DEVICE INFO",
             title: "Unavailable - Could not reach HDHomeRun API",
-            url: `${EXTERNAL_URL}/assets/fallback_icon.png`
+            url: `${EXTERNAL_URL}/assets/hdhomerun_icon.png`
         };
     }
 
-    const streams = [
-        { 
-            title: '🌀 Mediaflow (HLS)', 
-            url: hlsUrl,
-            behaviorHints: { 
-                notWebReady: false, 
-                bingeGroup: "tv" 
-            }
-        },
-        { 
-            title: '📡 Direct (Raw)', 
-            url: rawUrl, 
-            behaviorHints: { notWebReady: true } 
-        }
-    ];
-    if (techInfoStream) streams.push(techInfoStream);
-
-    return { streams };
+    return {
+        streams: [
+            { 
+                // Displays: "🌀 Mediaflow (The Price Is Right)"
+                title: `🌀 Mediaflow ${showTitle}`, 
+                url: hlsUrl,
+                behaviorHints: { notWebReady: false, bingeGroup: "tv" } 
+            },
+            { 
+                title: `📡 Direct ${showTitle}`, 
+                url: rawUrl, 
+                behaviorHints: { notWebReady: true } 
+            },
+            ...(techInfoStream ? [techInfoStream] : [])
+        ]
+    };
 });
 
 // --- Server Setup ---
@@ -176,7 +184,7 @@ app.use('/', addonRouter);
 app.get('/assets/:filename', async (req, res) => {
     const rawName = req.params.filename.replace('.png', '');
     const cleanName = decodeURIComponent(rawName);
-    const githubUrl = `https://raw.githubusercontent.com/tv-logos/tv-logos/main/countries/united-states/${cleanName}.png`;
+    //const githubUrl = `https://raw.githubusercontent.com/tv-logos/tv-logos/main/countries/united-states/us-local/${cleanName}.png`;
     const uiAvatarsUrl = `https://ui-avatars.com/api/?name=${cleanName}&background=random&color=fff&size=512&font-size=0.5&bold=true`;
 
     try {
@@ -194,7 +202,7 @@ app.get('/assets/:filename', async (req, res) => {
 app.get('/health', async (req, res) => {
     try {
         await axios.get(`http://${HDHOMERUN_IP}/discover.json`, { timeout: 1500 });
-        res.status(200).send('OK');
+        res.status(200).send(`HDHomerun available at ${HDHOMERUN_IP}`);
     } catch (e) { res.status(503).send('Unreachable'); }
 });
 
